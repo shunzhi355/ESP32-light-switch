@@ -8,9 +8,10 @@
 
 - 语音控制灯 1 开/关、灯 2 开/关、两灯同时开/关
 - 手机网页分别开关两盏灯，一键全开和一键全关
-- 家庭 2.4 GHz Wi-Fi 连接失败时自动建立应急热点
+- 上电立即建立应急热点，同时尝试连接家庭 2.4 GHz Wi-Fi
 - 串口帧头、异或校验、帧间超时恢复，能过滤启动日志或线路干扰
 - 舵机按压后自动回到中位并停止 PWM，降低持续堵转、发热和抖动
+- 板载 LED 上电常亮，执行网页或语音命令期间闪烁，动作完成后恢复常亮
 - 上电不主动转动舵机；首次操作前网页状态显示“未知”
 
 ## 接线
@@ -32,6 +33,8 @@
 2. 所有模块必须共地。舵机接口附近保留原理图中的 470 µF 电解电容，NodeMCU 和 SU-03T 电源入口保留 10 µF + 100 nF 去耦。
 3. SU-03T 的 UART 是 3.3 V 电平，可与 ESP8266 直接连接；图中的 100 Ω 串联电阻可保留。
 4. SU-03T 保持原理图的 RX/TX 接口，TX、RX 按上表交叉连接。
+
+当前 NodeMCU 实物的板载蓝色 LED 使用 D4/GPIO2，且为低电平点亮。GPIO2 同时是 UART1 TX，因此固件不启用 UART1 调试输出，避免 LED 与串口相互干扰。如果换用板级 LED 位于 GPIO16 的其他版本，可把 `BOARD_LED_PIN` 改为 `16`。
 
 ## SU-03T 串口协议
 
@@ -66,7 +69,7 @@ CHECKSUM = 55 XOR AA XOR CMD XOR RESULT
 
 编辑 [`include/project_config.h`](include/project_config.h)：
 
-1. 将 `WIFI_SSID` 和 `WIFI_PASSWORD` 攓成家庭 2.4 GHz Wi-Fi。保持占位内容时，ESP8266 会直接建立类似 `ESP8266-Light-ABC123` 的热点，密码为 `light8266`。
+1. 将 `WIFI_SSID` 和 `WIFI_PASSWORD` 改成家庭 2.4 GHz Wi-Fi。无论家庭 Wi-Fi 是否成功连接，ESP8266 都会建立类似 `ESP8266-Light-ABC123` 的管理热点，密码为 `light8266`。
 2. 舵机先不要安装到开关上，通电观察动作，再修改 `SERVO_1_*_ANGLE` 和 `SERVO_2_*_ANGLE`。默认假设两个舵机镜像安装。
 3. 若开关没有压到位，微调 ON/OFF 角；若挤压过大，减小目标角与中位角的差值。必要时调整 `SERVO_PRESS_MS`。
 
@@ -80,11 +83,11 @@ pio run -t upload
 pio device monitor
 ```
 
-工程目标板已经固定为 `nodemcuv2`。USB 串口对应 UART0，波特率为 9600，用于 SU-03T 数据帧；程序不会向该串口输出普通调试文字。诊断日志从 UART1 TX（D4/GPIO2）以 115200 输出，如有需要可连接独立 USB-TTL 模块查看。首次构建时 PlatformIO 会自动安装固定版本的 ESP8266 平台依赖。
+工程目标板已经固定为 `nodemcuv2`。USB 串口对应 UART0，波特率为 9600，用于 SU-03T 数据帧；程序不会向该串口输出普通调试文字。首次构建时 PlatformIO 会自动安装固定版本的 ESP8266 平台依赖。
 
 启动后的访问方式：
 
-- 成功连接路由器：访问 `http://light-control.local/`，也可从路由器 DHCP 列表或 UART1 调试输出查询局域网 IP
+- 成功连接路由器：访问 `http://light-control.local/`，也可从路由器 DHCP 列表查询局域网 IP
 - 未配置或连接失败：手机连接 `ESP8266-Light-xxxxxx`，密码 `light8266`，访问 `http://192.168.4.1/`
 
 ## HTTP 接口

@@ -1,4 +1,12 @@
 {
   "C_Cpp.default.configurationProvider": "platformio.platformio-ide",
-  "C_Cpp.intelliSenseEngine": "default"
+  "C_Cpp.intelliSenseEngine": "default",
+  "clangd.path": "C:\\Users\\user\\.espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=d:\\ESP32\\project\\8266\\build"
+  ],
+  "idf.currentSetup": "C:\\Users\\user\\esp\\v5.5.1\\esp-idf",
+  "idf.portWin": "COM10"
 }

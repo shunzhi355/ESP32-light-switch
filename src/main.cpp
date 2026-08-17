@@ -78,7 +78,7 @@ buttons.forEach(b=>b.addEventListener('click',()=>act(b.dataset.target,b.dataset
 
 bool wifiCredentialsConfigured() {
   return ProjectConfig::WIFI_SSID[0] != '\0' &&
-         strcmp(ProjectConfig::WIFI_SSID, "YOUR_WIFI_SSID") != 0;
+         strcmp(ProjectConfig::WIFI_SSID, "TP-LINK_6465") != 0;
 }
 
 String activeIpAddress() {
@@ -116,6 +116,33 @@ String buildStateJson() {
   return json;
 }
 
+void setBoardLed(bool on) {
+  const uint8_t level =
+      (on == ProjectConfig::BOARD_LED_ACTIVE_LOW) ? LOW : HIGH;
+  digitalWrite(ProjectConfig::BOARD_LED_PIN, level);
+}
+
+void delayWithCommandBlink(uint32_t durationMs) {
+  const uint32_t startedAt = millis();
+  bool ledOn = false;
+  setBoardLed(ledOn);
+
+  while (static_cast<uint32_t>(millis() - startedAt) < durationMs) {
+    const uint32_t elapsed = static_cast<uint32_t>(millis() - startedAt);
+    const uint32_t remaining = durationMs - elapsed;
+    const uint32_t waitMs =
+        remaining < ProjectConfig::BOARD_LED_BLINK_INTERVAL_MS
+            ? remaining
+            : ProjectConfig::BOARD_LED_BLINK_INTERVAL_MS;
+    delay(waitMs);
+    ledOn = !ledOn;
+    setBoardLed(ledOn);
+  }
+
+  // 空闲状态保持常亮。
+  setBoardLed(true);
+}
+
 void sendJsonState(int statusCode = 200) {
   server.sendHeader(F("Cache-Control"), F("no-store"));
   server.send(statusCode, F("application/json; charset=utf-8"), buildStateJson());
@@ -146,7 +173,7 @@ bool operateServos(uint8_t target, bool turnOn) {
 
   if (moveFirst) attachAtNeutral(0);
   if (moveSecond) attachAtNeutral(1);
-  delay(ProjectConfig::SERVO_SETTLE_MS);
+  delayWithCommandBlink(ProjectConfig::SERVO_SETTLE_MS);
 
   // 两路目标角连续写入，时间差只有微秒量级，可视为同时动作。
   if (moveFirst) {
@@ -157,11 +184,11 @@ bool operateServos(uint8_t target, bool turnOn) {
     servos[1].write(turnOn ? SERVO_CONFIG[1].onAngle
                             : SERVO_CONFIG[1].offAngle);
   }
-  delay(ProjectConfig::SERVO_PRESS_MS);
+  delayWithCommandBlink(ProjectConfig::SERVO_PRESS_MS);
 
   if (moveFirst) servos[0].write(SERVO_CONFIG[0].neutralAngle);
   if (moveSecond) servos[1].write(SERVO_CONFIG[1].neutralAngle);
-  delay(ProjectConfig::SERVO_RETURN_MS);
+  delayWithCommandBlink(ProjectConfig::SERVO_RETURN_MS);
 
   if (moveFirst) {
     servos[0].detach();
@@ -175,8 +202,6 @@ bool operateServos(uint8_t target, bool turnOn) {
   }
 
   actionBusy = false;
-  Serial1.printf("[SERVO] target=%u, state=%s\n", target,
-                 turnOn ? "ON" : "OFF");
   return true;
 }
 
@@ -210,8 +235,6 @@ void pollVoiceSerial() {
     const uint8_t value = static_cast<uint8_t>(voiceSerial.read());
     VoiceProtocol::Frame frame{};
     if (voiceParser.push(value, millis(), frame)) {
-      Serial1.printf("[VOICE] command=0x%02X, parameter=0x%02X\n",
-                     frame.command, frame.parameter);
       const VoiceProtocol::Result result = executeVoiceFrame(frame);
       sendVoiceResponse(frame.command, result);
     }
@@ -263,7 +286,6 @@ void configureWebServer() {
     }
   });
   server.begin();
-  Serial1.println(F("[HTTP] server started on port 80"));
 }
 
 void startFallbackAp() {
@@ -271,15 +293,20 @@ void startFallbackAp() {
 
   snprintf(fallbackApName, sizeof(fallbackApName), "%s-%06X",
            ProjectConfig::AP_NAME_PREFIX, ESP.getChipId());
-  WiFi.mode(wifiCredentialsConfigured() ? WIFI_AP_STA : WIFI_AP);
-  fallbackApRunning = WiFi.softAP(fallbackApName, ProjectConfig::AP_PASSWORD);
+  WiFi.mode(WIFI_AP_STA);
+  delay(100);
+
+  // 固定使用 2.4 GHz 信道 1，避免在 STA 尚未连接时热点不广播。
+  fallbackApRunning =
+      WiFi.softAP(fallbackApName, ProjectConfig::AP_PASSWORD, 1, false, 4);
+  if (!fallbackApRunning) {
+    WiFi.softAPdisconnect(true);
+    delay(100);
+    fallbackApRunning =
+        WiFi.softAP(fallbackApName, ProjectConfig::AP_PASSWORD, 1, false, 4);
+  }
   if (fallbackApRunning) {
     dnsServer.start(53, "*", WiFi.softAPIP());
-    Serial1.printf("[WiFi] AP: %s, password: %s, IP: %s\n", fallbackApName,
-                   ProjectConfig::AP_PASSWORD,
-                   WiFi.softAPIP().toString().c_str());
-  } else {
-    Serial1.println(F("[WiFi] failed to start fallback AP"));
   }
 }
 
@@ -288,31 +315,23 @@ void configureWifi() {
   WiFi.setAutoReconnect(true);
   WiFi.hostname(ProjectConfig::MDNS_HOSTNAME);
 
+  // 先启动管理热点，保证路由器配置错误或离线时仍可进入控制页。
+  startFallbackAp();
+
   if (!wifiCredentialsConfigured()) {
-    Serial1.println(F("[WiFi] credentials not configured; starting AP"));
-    startFallbackAp();
     return;
   }
 
-  WiFi.mode(WIFI_STA);
   WiFi.begin(ProjectConfig::WIFI_SSID, ProjectConfig::WIFI_PASSWORD);
-  Serial1.printf("[WiFi] connecting to %s", ProjectConfig::WIFI_SSID);
   const uint32_t startedAt = millis();
   while (WiFi.status() != WL_CONNECTED &&
          static_cast<uint32_t>(millis() - startedAt) <
              ProjectConfig::WIFI_CONNECT_TIMEOUT_MS) {
     delay(250);
-    Serial1.print('.');
   }
-  Serial1.println();
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial1.printf("[WiFi] connected, IP: %s\n",
-                   WiFi.localIP().toString().c_str());
-  } else {
-    Serial1.println(F("[WiFi] connection timeout; starting fallback AP"));
+  if (WiFi.status() != WL_CONNECTED) {
     disconnectedSinceMs = millis();
-    startFallbackAp();
   }
 }
 
@@ -320,7 +339,6 @@ void configureMdns() {
   mdnsRunning = MDNS.begin(ProjectConfig::MDNS_HOSTNAME);
   if (mdnsRunning) {
     MDNS.addService("http", "tcp", 80);
-    Serial1.printf("[mDNS] http://%s.local/\n", ProjectConfig::MDNS_HOSTNAME);
   }
 }
 
@@ -348,18 +366,15 @@ void maintainWifi() {
 }  // namespace
 
 void setup() {
+  pinMode(ProjectConfig::BOARD_LED_PIN, OUTPUT);
+  setBoardLed(true);
+
   // UART0 使用原理图的 RX(GPIO3)/TX(GPIO1) 与 SU-03T 通信。
   voiceSerial.begin(ProjectConfig::VOICE_BAUD_RATE);
-  // UART1 仅有 TX，诊断输出位于 D4/GPIO2，不会混入语音协议。
-  Serial1.begin(115200);
-  Serial1.println();
-  Serial1.println(F("ESP8266 dual-servo light controller"));
 
   configureWifi();
   configureMdns();
   configureWebServer();
-
-  Serial1.println(F("[VOICE] waiting for AA 55 CMD PARAM XOR frames"));
 }
 
 void loop() {
