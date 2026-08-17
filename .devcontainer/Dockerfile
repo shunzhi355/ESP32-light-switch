@@ -1,13 +1,3 @@
-ARG DOCKER_TAG=latest
-FROM espressif/idf:${DOCKER_TAG}
+FROM mcr.microsoft.com/devcontainers/python:1-3.11-bookworm
 
-ENV LC_ALL=C.UTF-8
-ENV LANG=C.UTF-8
-
-RUN apt-get update -y && apt-get install udev -y
-
-RUN echo "source /opt/esp/idf/export.sh > /dev/null 2>&1" >> ~/.bashrc
-
-ENTRYPOINT [ "/opt/esp/entrypoint.sh" ]
-
-CMD ["/bin/bash", "-c"]
+RUN pip install --no-cache-dir platformio==6.1.19
